@@ -1,9 +1,15 @@
+using Microsoft.EntityFrameworkCore;
+using MinimalAPI;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddDbContext<SqlContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
+);
 
 var app = builder.Build();
 
@@ -16,28 +22,47 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+// method
+async Task<List<Person>> GetAll(SqlContext context) =>
+    await context.People.ToListAsync();
 
-app.MapGet("/weatherforecast", () =>
+app.MapGet("/People", async (SqlContext context) => await context.People.ToListAsync());
+
+app.MapGet("/Person/{id}", async (SqlContext context, int id) =>
+    await context.People.FindAsync(id) is Person person ?
+        Results.Ok(person) :
+        Results.NotFound("Person not found."));
+
+app.MapPost("/Person", async (SqlContext context, Person person) =>
 {
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateTime.Now.AddDays(index),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    context.People.Add(person);
+    await context.SaveChangesAsync();
+    return Results.Ok(await GetAll(context));
+});
+
+app.MapPut("Person/{id}", async (SqlContext context, Person person, int id) =>
+{
+    var dbPerson = await context.People.FindAsync(id);
+    if (dbPerson == null) return Results.NotFound("Person not found.");
+
+    dbPerson.FirstName = person.FirstName;
+    dbPerson.LastName = person.LastName;
+    dbPerson.City = person.City;
+    await context.SaveChangesAsync();
+
+    return Results.Ok(await GetAll(context));
+});
+
+app.MapDelete("Person/{id}", async (SqlContext context, int id) =>
+{
+    var dbPerson = await context.People.FindAsync(id);
+    if (dbPerson == null) return Results.NotFound("Person not found.");
+
+    context.People.Remove(dbPerson);
+    await context.SaveChangesAsync();
+
+    return Results.Ok(await GetAll(context));
+});
 
 app.Run();
 
-internal record WeatherForecast(DateTime Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
